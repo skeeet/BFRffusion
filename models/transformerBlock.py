@@ -263,10 +263,11 @@ class MFEM(nn.Module):
 
     def forward(self, x, hint, timesteps, context, **kwargs):
         t_emb = timestep_embedding(timesteps, self.control_channels, repeat_only=False)
+        t_emb = t_emb.to(dtype=self.time_embed[0].weight.dtype)
         emb = self.time_embed(t_emb)
 
         hint = self.input_hint_block(hint, emb, context)
-        x = self.input_blocks(x, emb, context) + hint
+        x = self.input_blocks(x.to(emb.dtype), emb, context) + hint
  
 
         # x = self.conv3x3(x)

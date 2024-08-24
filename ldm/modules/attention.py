@@ -8,24 +8,26 @@ from typing import Optional, Any
 
 from ldm.modules.diffusionmodules.util import checkpoint
 
-
 try:
     import xformers
     import xformers.ops
+
     XFORMERS_IS_AVAILBLE = True
 except:
     XFORMERS_IS_AVAILBLE = False
 
 # CrossAttn precision handling
 import os
+
 _ATTN_PRECISION = os.environ.get("ATTN_PRECISION", "fp32")
+
 
 def exists(val):
     return val is not None
 
 
 def uniq(arr):
-    return{el: True for el in arr}.keys()
+    return {el: True for el in arr}.keys()
 
 
 def default(val, d):
@@ -124,12 +126,12 @@ class SpatialSelfAttention(nn.Module):
         v = self.v(h_)
 
         # compute attention
-        b,c,h,w = q.shape
+        b, c, h, w = q.shape
         q = rearrange(q, 'b c h w -> b (h w) c')
         k = rearrange(k, 'b c h w -> b c (h w)')
         w_ = torch.einsum('bij,bjk->bik', q, k)
 
-        w_ = w_ * (int(c)**(-0.5))
+        w_ = w_ * (int(c) ** (-0.5))
         w_ = torch.nn.functional.softmax(w_, dim=2)
 
         # attend to values
@@ -139,7 +141,7 @@ class SpatialSelfAttention(nn.Module):
         h_ = rearrange(h_, 'b c (h w) -> b c h w', h=h)
         h_ = self.proj_out(h_)
 
-        return x+h_
+        return x + h_
 
 
 class CrossAttention(nn.Module):
@@ -171,15 +173,16 @@ class CrossAttention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
 
         # force cast to fp32 to avoid overflowing
-        if _ATTN_PRECISION =="fp32":
-            with torch.autocast(enabled=False, device_type = 'cuda'):
+        if _ATTN_PRECISION == "fp32":
+            q, k = q.float(), k.float()
+            with torch.autocast(enabled=False, device_type='cuda'):
                 q, k = q.float(), k.float()
                 sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
         else:
             sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
-        
+
         del q, k
-    
+
         if exists(mask):
             mask = rearrange(mask, 'b ... -> b (...)')
             max_neg_value = -torch.finfo(sim.dtype).max
@@ -188,6 +191,7 @@ class CrossAttention(nn.Module):
 
         # attention, what we cannot get enough of
         sim = sim.softmax(dim=-1)
+        sim = sim.to(v.dtype)
 
         out = einsum('b i j, b j d -> b i d', sim, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
@@ -248,6 +252,7 @@ class BasicTransformerBlock(nn.Module):
         "softmax": CrossAttention,  # vanilla attention
         "softmax-xformers": MemoryEfficientCrossAttention
     }
+
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True,
                  disable_self_attn=False):
         super().__init__()
@@ -284,6 +289,7 @@ class SpatialTransformer(nn.Module):
     Finally, reshape to image
     NEW: use_linear for more efficiency instead of the 1x1 convs
     """
+
     def __init__(self, in_channels, n_heads, d_head,
                  depth=1, dropout=0., context_dim=None,
                  disable_self_attn=False, use_linear=False,
@@ -306,7 +312,7 @@ class SpatialTransformer(nn.Module):
         self.transformer_blocks = nn.ModuleList(
             [BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim[d],
                                    disable_self_attn=disable_self_attn, checkpoint=use_checkpoint)
-                for d in range(depth)]
+             for d in range(depth)]
         )
         if not use_linear:
             self.proj_out = zero_module(nn.Conv2d(inner_dim,
@@ -338,4 +344,3 @@ class SpatialTransformer(nn.Module):
         if not self.use_linear:
             x = self.proj_out(x)
         return x + x_in
-

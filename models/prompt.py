@@ -44,7 +44,11 @@ class TTPM(nn.Module):
 
         
     def forward(self, t):
+        dtype = self.time_embed[0].weight.dtype
+
         t_emb = timestep_embedding(t, self.model_channels, repeat_only=False)
+        t_emb=t_emb.to(dtype=dtype)
+
         emb = self.time_embed(t_emb)
         emb = self.dropout(F.normalize(emb))
         emb = emb.unsqueeze(1).expand(-1, self.prompt_channels, -1)

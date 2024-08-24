@@ -14,16 +14,22 @@ from facexlib.utils.face_restoration_helper import FaceRestoreHelper
 from basicsr.utils import imwrite
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
+import pathlib
 
 def main(opt):
     # ------------------------ input & output ------------------------
+    inpath = pathlib.Path(opt.input)
+
     if opt.input.endswith('/'):
         opt.input = opt.input[:-1]
     if os.path.isfile(opt.input):
         img_list = [opt.input]
     else:
-        img_list = sorted(glob.glob(os.path.join(opt.input, '*')))
+
+        img_list = [*inpath.glob('**/*.jpg')]
+        img_list += [*inpath.glob('**/*.png')]
+        img_list = sorted([str(v) for v in img_list])
+        # img_list = sorted(glob.glob(os.path.join(opt.input, '*')))
 
     os.makedirs(opt.output, exist_ok=True)
 
@@ -71,6 +77,8 @@ def main(opt):
     ddim_sampler = DDIMSampler(model)
     H = W = opt.image_size
     shape = (4, H // 8, W // 8)
+    model = torch.compile(model)
+    base_outpath = pathlib.Path(opt.output)
 
     # ------------------------ restore ------------------------
     for img_path in img_list:
@@ -81,9 +89,11 @@ def main(opt):
         print(f'Processing {img_name} ...')
         basename, ext = os.path.splitext(img_name)
         img = cv2.imread(img_path, cv2.IMREAD_COLOR)
-
+        if img is None:
+            print(f'Failed to read {img_name}')
+            continue
         if opt.aligned:  # the inputs are already aligned
-            img = cv2.resize(img, (512, 512))
+            img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_CUBIC)
             face_helper.cropped_faces = [img]
         else:
             face_helper.read_image(img)
@@ -102,9 +112,7 @@ def main(opt):
 
             try:
                 cond = {"c_concat": [cropped_face_t], "c_crossattn": []}
-                samples, _ = ddim_sampler.sample(opt.ddim_steps, 1,
-                                                shape, cond, verbose=False)
-                
+                samples, _ = ddim_sampler.sample(opt.ddim_steps, 1,shape, cond, verbose=False)
                 hq_imgs =model.decode_first_stage(samples)
 
                 # convert to image
@@ -128,36 +136,42 @@ def main(opt):
             # paste each restored face to the input image
             restored_img = face_helper.paste_faces_to_input_image(upsample_img=bg_img)
         else:
-            restored_img = None
+            restored_img = restored_face
 
-        # save faces
-        for idx, (cropped_face, restored_face) in enumerate(zip(face_helper.cropped_faces, face_helper.restored_faces)):
-            # save cropped face
-            save_crop_path = os.path.join(opt.output, 'cropped_faces', f'{basename}_{idx:02d}.png')
-            imwrite(cropped_face, save_crop_path)
-            # save restored face
-            if opt.suffix is not None:
-                save_face_name = f'{basename}_{idx:02d}_{opt.suffix}.png'
-            else:
-                save_face_name = f'{basename}_{idx:02d}.png'
-            save_restore_path = os.path.join(opt.output, 'restored_faces', save_face_name)
-            imwrite(restored_face, save_restore_path)
-            # save comparison image
-            cmp_img = np.concatenate((cropped_face, restored_face), axis=1)
-            imwrite(cmp_img, os.path.join(opt.output, 'cmp', f'{basename}_{idx:02d}.png'))
+        # # save faces
+        # for idx, (cropped_face, restored_face) in enumerate(zip(face_helper.cropped_faces, face_helper.restored_faces)):
+        #     # save cropped face
+        #     save_crop_path = os.path.join(opt.output, 'cropped_faces', f'{basename}_{idx:02d}.png')
+        #     imwrite(cropped_face, save_crop_path)
+        #     # save restored face
+        #     if opt.suffix is not None:
+        #         save_face_name = f'{basename}_{idx:02d}_{opt.suffix}.png'
+        #     else:
+        #         save_face_name = f'{basename}_{idx:02d}.png'
+        #     save_restore_path = os.path.join(opt.output, 'restored_faces', save_face_name)
+        #     imwrite(restored_face, save_restore_path)
+        #     # save comparison image
+        #     cmp_img = np.concatenate((cropped_face, restored_face), axis=1)
+        #     imwrite(cmp_img, os.path.join(opt.output, 'cmp', f'{basename}_{idx:02d}.png'))
+
 
         # save restored img
         if restored_img is not None:
-            if opt.ext == 'auto':
-                extension = ext[1:]
-            else:
-                extension = opt.ext
+            # if opt.ext == 'auto':
+            #     extension = ext[1:]
+            # else:
+            #     extension = opt.ext
+            #
+            # if opt.suffix is not None:
+            #     save_restore_path = os.path.join(opt.output, 'restored_imgs', f'{basename}_{opt.suffix}.{extension}')
+            # else:
+            #     save_restore_path = os.path.join(opt.output, 'restored_imgs', f'{basename}.{extension}')
+            #
 
-            if opt.suffix is not None:
-                save_restore_path = os.path.join(opt.output, 'restored_imgs', f'{basename}_{opt.suffix}.{extension}')
-            else:
-                save_restore_path = os.path.join(opt.output, 'restored_imgs', f'{basename}.{extension}')
-            imwrite(restored_img, save_restore_path)
+            savepath = base_outpath.joinpath(pathlib.Path(img_path).relative_to(inpath))
+            savepath.parent.mkdir(exist_ok=True,parents=True,mode=0o777)
+
+            imwrite(restored_img, str(savepath))
 
     print(f'Results are in the [{opt.output}] folder.')
 
