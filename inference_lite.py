@@ -1,3 +1,4 @@
+import json
 import os
 import torch
 import numpy as np
@@ -32,6 +33,7 @@ def tensor2img_fast(tensor, rgb2bgr=True, min_max=(0, 1)):
         output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
     return output
 
+
 @torch.no_grad()
 def main(opt):
     # ------------------------ input & output ------------------------
@@ -41,6 +43,23 @@ def main(opt):
     base_outpath = pathlib.Path(opt.output)
     base_outpath.mkdir(exist_ok=True, mode=0o777, parents=True)
 
+    # filter out existing files and files in blacklist
+    img_list_filtered = []
+    skip_list = None
+    if opt.skip_list is not None:
+        with open(opt.skip_list, 'r') as f:
+            skip_list = json.loads(f.read())
+            skip_list = [v[0].split('/')[0] for v in skip_list.values()]
+
+    for img_path in tqdm(img_list, dynamic_ncols=True, desc='prefiltering existing data...'):
+        savepath = base_outpath.joinpath(pathlib.Path(img_path).relative_to(inpath))
+        if skip_list is not None and savepath.parent.name in skip_list:
+            continue
+        if not savepath.exists():
+            img_list_filtered.append(img_path)
+
+    img_list = img_list_filtered
+    del img_list_filtered
     # initialize model
     device = torch.device('cpu')
     if torch.cuda.is_available():
@@ -75,7 +94,6 @@ def main(opt):
 
     H = W = opt.image_size
     shape = (4, H // 8, W // 8)
-
 
     if opt.compile:
         model.compile_models()
@@ -127,6 +145,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=132456)
     parser.add_argument("--compile", action="store_true", help='Use torch compiler for models')
     parser.add_argument("--half", action="store_true", help='Use f16 precision')
+    parser.add_argument('--skip-list', type=str, help='Optional path to already processed files list')
+
     opt = parser.parse_args()
 
     main(opt)

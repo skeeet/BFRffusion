@@ -74,9 +74,9 @@ class BFRffusion(LatentDiffusion):
 
     def compile_models(self):
         self.model = torch.compile(self.model)
-        self.control_model = torch.compile(self.control_model)
-        self.first_stage_model = torch.compile(self.first_stage_model)
-        self.cond_stage_model = torch.compile(self.cond_stage_model)
+        self.control_model = torch.compile(self.control_model,fullgraph=True)
+        self.first_stage_model = torch.compile(self.first_stage_model,fullgraph=True)
+        self.cond_stage_model = torch.compile(self.cond_stage_model,fullgraph=True)
 
 
     def apply_model(self, x_noisy, t, cond, *args, **kwargs):
